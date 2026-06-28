@@ -1,0 +1,367 @@
+package com.ella.music.ui.components
+
+import android.app.Activity
+import android.content.Context
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.IntentSenderRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import com.ella.music.R
+import com.ella.music.data.exception.WritePermissionRequiredException
+import com.ella.music.data.model.Song
+import com.ella.music.data.model.albumIdentityId
+import com.ella.music.data.splitArtistNames
+import com.ella.music.data.tagIdentityKey
+import com.ella.music.viewmodel.MainViewModel
+import com.ella.music.viewmodel.PlayerViewModel
+import kotlinx.coroutines.launch
+
+@Composable
+fun SongMoreActionHost(
+    actionSong: Song?,
+    mainViewModel: MainViewModel,
+    playerViewModel: PlayerViewModel,
+    onDismissAction: () -> Unit,
+    onNavigateToAlbum: (Long) -> Unit = {},
+    onNavigateToArtist: (String) -> Unit = {},
+    onSongRemovedFromPlaylist: ((Song) -> Unit)? = null,
+    deleteFromLibrary: Boolean = true,
+    showDelete: Boolean = true,
+    showLocalFileActions: Boolean = true,
+    showAddToQueue: Boolean = true,
+    resolveSongForAction: (suspend (Song) -> Song)? = null,
+    onDeleteSong: ((Song) -> Unit)? = null,
+    extraTopContent: (@Composable ColumnScope.() -> Unit)? = null
+) {
+    val context = LocalContext.current
+    val actionSheetTitle = stringResource(R.string.song_more_actions_title)
+    val addToPlaylistFailed = stringResource(R.string.song_more_add_to_playlist_failed)
+    val addToQueueFailed = stringResource(R.string.song_more_add_to_queue_failed)
+    val playNextFailed = stringResource(R.string.song_more_play_next_failed)
+    val shareFailed = stringResource(R.string.song_more_share_failed)
+    val addedToPlayNext = stringResource(R.string.song_more_added_to_play_next)
+    val addedToQueue = stringResource(R.string.song_more_added_to_queue)
+    val noArtistJump = stringResource(R.string.song_more_no_artist_jump)
+    val noAlbumJump = stringResource(R.string.song_more_no_album_jump)
+    val selectArtistTitle = stringResource(R.string.song_more_select_artist)
+    val addToPlaylistTitle = stringResource(R.string.song_more_add_to_playlist_title)
+    val editTagTitle = stringResource(R.string.song_more_edit_tags_title)
+    val lyricTimingTitle = stringResource(R.string.song_more_lyric_timing)
+    val aiInterpretTitle = stringResource(R.string.song_more_ai_title)
+    val playlists by mainViewModel.playlists.collectAsState(initial = emptyList())
+    val metadataEditorId by mainViewModel.settingsManager.metadataEditorId.collectAsState(initial = TagEditorOptionIds.ASK_EACH_TIME)
+    val lyricTimingEditorId by mainViewModel.settingsManager.lyricTimingEditorId.collectAsState(initial = TagEditorOptionIds.ASK_EACH_TIME)
+    val scope = rememberCoroutineScope()
+    var playlistSong by remember { mutableStateOf<Song?>(null) }
+    var createPlaylistSong by remember { mutableStateOf<Song?>(null) }
+    var tagEditorSong by remember { mutableStateOf<Song?>(null) }
+    var tagEditorKind by remember { mutableStateOf(TagEditorOptionKind.Metadata) }
+    var metadataEditorSong by remember { mutableStateOf<Song?>(null) }
+    var ratingSong by remember { mutableStateOf<Song?>(null) }
+    var infoSong by remember { mutableStateOf<Song?>(null) }
+    var aiSong by remember { mutableStateOf<Song?>(null) }
+    var artistChoices by remember { mutableStateOf<List<String>>(emptyList()) }
+    var dangerConfirmTitle by remember { mutableStateOf("") }
+    var dangerConfirmMessage by remember { mutableStateOf("") }
+    var dangerConfirmText by remember { mutableStateOf("") }
+    var dangerConfirmAction by remember { mutableStateOf<(() -> Unit)?>(null) }
+    var pendingWriteRetry by remember { mutableStateOf<(suspend () -> Unit)?>(null) }
+    val writePermissionNeeded = stringResource(R.string.song_more_metadata_write_permission_needed)
+
+    val writePermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            pendingWriteRetry?.let { retry ->
+                scope.launch { retry() }
+                pendingWriteRetry = null
+            }
+        } else {
+            pendingWriteRetry = null
+            Toast.makeText(context, writePermissionNeeded, Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun closeAction() = onDismissAction()
+
+    fun requestDangerConfirm(
+        title: String,
+        message: String,
+        confirmText: String,
+        action: () -> Unit
+    ) {
+        dangerConfirmTitle = title
+        dangerConfirmMessage = message
+        dangerConfirmText = confirmText
+        dangerConfirmAction = action
+    }
+
+    fun runResolvedSongAction(
+        sourceSong: Song,
+        failureMessage: String,
+        action: (Song) -> Unit
+    ) {
+        scope.launch {
+            runCatching {
+                resolveSongForAction?.invoke(sourceSong) ?: sourceSong
+            }.onSuccess { resolvedSong ->
+                action(resolvedSong)
+            }.onFailure { error ->
+                Toast.makeText(context, error.localizedMessage ?: failureMessage, Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    actionSong?.let { song ->
+        EllaMiuixBottomSheet(
+            show = true,
+            enableNestedScroll = false,
+            title = song.title.ifBlank { actionSheetTitle },
+            onDismissRequest = ::closeAction
+        ) {
+            SongMoreActionSheet(
+                song = song,
+                extraTopContent = extraTopContent,
+                onDismiss = ::closeAction,
+                onAddToPlaylist = {
+                    runResolvedSongAction(song, addToPlaylistFailed) { resolvedSong ->
+                        playlistSong = resolvedSong
+                        closeAction()
+                    }
+                },
+                onAddToQueue = {
+                    runResolvedSongAction(song, addToQueueFailed) { resolvedSong ->
+                        playerViewModel.addToPlaylist(resolvedSong)
+                        Toast.makeText(context, addedToQueue, Toast.LENGTH_SHORT).show()
+                        closeAction()
+                    }
+                },
+                onPlayNext = {
+                    runResolvedSongAction(song, playNextFailed) { resolvedSong ->
+                        playerViewModel.playNext(resolvedSong)
+                        Toast.makeText(context, addedToPlayNext, Toast.LENGTH_SHORT).show()
+                        closeAction()
+                    }
+                },
+                onShare = {
+                    runResolvedSongAction(song, shareFailed) { resolvedSong ->
+                        shareLocalSong(context, resolvedSong)
+                        closeAction()
+                    }
+                },
+                onSpectrum = {
+                    openSongSpectrumWithAspectPro(context, song)
+                    closeAction()
+                },
+                onInfo = {
+                    infoSong = song
+                    closeAction()
+                },
+                onRating = {
+                    ratingSong = song
+                    closeAction()
+                },
+                onAiInterpret = {
+                    aiSong = song
+                    closeAction()
+                },
+                onArtist = {
+                    val artists = splitArtistNames(song.artist)
+                        .distinctBy { it.tagIdentityKey() }
+                    when (artists.size) {
+                        0 -> Toast.makeText(context, noArtistJump, Toast.LENGTH_SHORT).show()
+                        1 -> onNavigateToArtist(artists.first())
+                        else -> artistChoices = artists
+                    }
+                    closeAction()
+                },
+                onAlbum = {
+                    val albumId = song.albumIdentityId()
+                    if (albumId > 0L) {
+                        onNavigateToAlbum(albumId)
+                    } else {
+                        Toast.makeText(context, noAlbumJump, Toast.LENGTH_SHORT).show()
+                    }
+                    closeAction()
+                },
+                onEditTag = if (showLocalFileActions) {
+                    {
+                        tagEditorKind = TagEditorOptionKind.Metadata
+                        tagEditorSong = song
+                        closeAction()
+                    }
+                } else null,
+                onLyricTiming = if (showLocalFileActions) {
+                    {
+                        tagEditorKind = TagEditorOptionKind.LyricTiming
+                        tagEditorSong = song
+                        closeAction()
+                    }
+                } else null,
+                onRemoveFromPlaylist = onSongRemovedFromPlaylist?.let {
+                    {
+                        closeAction()
+                        requestDangerConfirm(
+                            title = context.getString(R.string.playlist_remove_song_title),
+                            message = context.getString(
+                                R.string.song_more_remove_from_playlist_message,
+                                song.title.ifBlank { song.fileName.ifBlank { context.getString(R.string.common_this_song) } }
+                            ),
+                            confirmText = context.getString(R.string.common_remove)
+                        ) {
+                            it(song)
+                        }
+                    }
+                },
+                onDelete = if (showDelete) {
+                    {
+                        closeAction()
+                        requestDangerConfirm(
+                            title = if (deleteFromLibrary) {
+                                context.getString(R.string.song_more_delete_song_title)
+                            } else {
+                                context.getString(R.string.song_more_remove_from_library_title)
+                            },
+                            message = if (deleteFromLibrary) {
+                                context.getString(
+                                    R.string.song_more_delete_song_message,
+                                    song.title.ifBlank { song.fileName.ifBlank { context.getString(R.string.common_this_song) } }
+                                )
+                            } else {
+                                context.getString(
+                                    R.string.song_more_remove_from_library_message,
+                                    song.title.ifBlank { song.fileName.ifBlank { context.getString(R.string.common_this_song) } }
+                                )
+                            },
+                            confirmText = if (deleteFromLibrary) {
+                                context.getString(R.string.song_more_delete_permanently)
+                            } else {
+                                context.getString(R.string.common_remove)
+                            }
+                        ) {
+                            if (onDeleteSong != null) {
+                                onDeleteSong(song)
+                            } else if (deleteFromLibrary) {
+                                scope.launch {
+                                    val result = mainViewModel.deleteSongsResult(listOf(song))
+                                    if (result.isSuccess) {
+                                        Toast.makeText(context, context.getString(R.string.library_deleted_songs, 1), Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        val error = result.exceptionOrNull()
+                                        if (error is WritePermissionRequiredException) {
+                                            pendingWriteRetry = {
+                                                mainViewModel.removeSongsFromLibrary(listOf(song))
+                                                Toast.makeText(context, context.getString(R.string.library_deleted_songs, 1), Toast.LENGTH_SHORT).show()
+                                            }
+                                            writePermissionLauncher.launch(
+                                                IntentSenderRequest.Builder(error.intentSender).build()
+                                            )
+                                        } else {
+                                            Toast.makeText(context, error?.localizedMessage ?: context.getString(R.string.song_more_metadata_save_failed), Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                                }
+                            } else {
+                                mainViewModel.removeSongsFromLibrary(listOf(song))
+                            }
+                        }
+                    }
+                } else null,
+                showSpectrum = showLocalFileActions,
+                showAddToQueue = showAddToQueue
+            )
+        }
+    }
+
+    ConfirmDangerDialog(
+        show = dangerConfirmAction != null,
+        title = dangerConfirmTitle,
+        message = dangerConfirmMessage,
+        confirmText = dangerConfirmText,
+        onDismiss = { dangerConfirmAction = null },
+        onConfirm = {
+            val action = dangerConfirmAction
+            dangerConfirmAction = null
+            action?.invoke()
+        }
+    )
+
+    if (artistChoices.isNotEmpty()) {
+        EllaMiuixBottomSheet(
+            show = true,
+            enableNestedScroll = false,
+            title = selectArtistTitle,
+            onDismissRequest = { artistChoices = emptyList() }
+        ) {
+            ArtistPickerContent(
+                artists = artistChoices,
+                onArtistSelected = { artist ->
+                    artistChoices = emptyList()
+                    onNavigateToArtist(artist)
+                },
+                onDismiss = { artistChoices = emptyList() }
+            )
+        }
+    }
+
+    SongMorePlaylistActionSheets(
+        context = context,
+        mainViewModel = mainViewModel,
+        playlists = playlists,
+        playlistSong = playlistSong,
+        onPlaylistSongChange = { playlistSong = it },
+        createPlaylistSong = createPlaylistSong,
+        onCreatePlaylistSongChange = { createPlaylistSong = it },
+        addToPlaylistTitle = addToPlaylistTitle
+    )
+
+    SongMoreTagActionSheets(
+        context = context,
+        scope = scope,
+        mainViewModel = mainViewModel,
+        tagEditorSong = tagEditorSong,
+        onTagEditorSongChange = { tagEditorSong = it },
+        tagEditorKind = tagEditorKind,
+        metadataEditorId = metadataEditorId,
+        lyricTimingEditorId = lyricTimingEditorId,
+        editTagTitle = editTagTitle,
+        lyricTimingTitle = lyricTimingTitle,
+        metadataEditorSong = metadataEditorSong,
+        onMetadataEditorSongChange = { metadataEditorSong = it },
+        onWritePermissionRequired = { error, retry ->
+            pendingWriteRetry = retry
+            writePermissionLauncher.launch(
+                IntentSenderRequest.Builder(error.intentSender).build()
+            )
+        }
+    )
+
+    SongMoreInfoActionSheets(
+        context = context,
+        scope = scope,
+        mainViewModel = mainViewModel,
+        ratingSong = ratingSong,
+        onRatingSongChange = { ratingSong = it },
+        infoSong = infoSong,
+        onInfoSongChange = { infoSong = it },
+        aiSong = aiSong,
+        onAiSongChange = { aiSong = it },
+        aiInterpretTitle = aiInterpretTitle,
+        onWritePermissionRequired = { error, retry ->
+            pendingWriteRetry = retry
+            writePermissionLauncher.launch(
+                IntentSenderRequest.Builder(error.intentSender).build()
+            )
+        }
+    )
+}

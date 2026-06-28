@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <cache-path
+        name="shared_logs"
+        path="shared_logs/" />
+    <cache-path
+        name="lyric_share"
+        path="lyric_share/" />
+    <cache-path
+        name="lyric_video_share"
+        path="lyric_video_share/" />
+    <external-path
+        name="external_storage"
+        path="." />
+</paths>

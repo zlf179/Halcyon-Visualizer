@@ -1,0 +1,784 @@
+package com.ella.music.ui.folder
+
+import android.app.Activity
+import android.widget.Toast
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.IntentSenderRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.lifecycle.lifecycleScope
+import com.ella.music.R
+import com.ella.music.data.exception.WritePermissionRequiredException
+import com.ella.music.data.model.FAVORITES_PLAYLIST_ID
+import com.ella.music.data.model.Song
+import com.ella.music.data.model.UserPlaylist
+import com.ella.music.data.model.playlistIdentityKey
+import com.ella.music.ui.LibrarySortUiState
+import com.ella.music.ui.components.ConfirmDangerDialog
+import com.ella.music.ui.components.AddToPlaylistSheet
+import com.ella.music.ui.components.DoubleTapScrollOverlay
+import com.ella.music.ui.components.EllaSearchBar
+import com.ella.music.ui.components.EllaMiuixBottomSheet
+import com.ella.music.ui.components.EllaMiuixSheetActions
+import com.ella.music.ui.components.EllaMiuixTextField
+import com.ella.music.ui.components.FastIndexBar
+import com.ella.music.ui.components.FolderOutlineIcon
+import com.ella.music.ui.components.FloatingSelectionControls
+import com.ella.music.ui.components.LibraryFloatingControlsBottomPadding
+import com.ella.music.ui.components.LibraryFloatingControlsEndPadding
+import com.ella.music.ui.components.LazyListScrollIndicator
+import com.ella.music.ui.components.LocateCurrentSongFloatingButton
+import com.ella.music.ui.components.SideIndexListEndPadding
+import com.ella.music.ui.components.SongItem
+import com.ella.music.ui.components.SongMoreActionHost
+import com.ella.music.ui.components.SortDropdownItem
+import com.ella.music.ui.components.SortDropdownMenu
+import com.ella.music.ui.components.createPlaylistOrShowDuplicateToast
+import com.ella.music.ui.components.ellaPageBackground
+import com.ella.music.ui.components.toFastIndexSection
+import com.ella.music.ui.components.wallpaperContentOverlayColor
+import com.ella.music.ui.settings.findComponentActivity
+import com.ella.music.viewmodel.MainViewModel
+import com.ella.music.viewmodel.PlayerViewModel
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import top.yukonga.miuix.kmp.basic.Button
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.IconButton
+import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.basic.ArrowRight
+import top.yukonga.miuix.kmp.icon.basic.Search
+import top.yukonga.miuix.kmp.icon.extended.Add
+import top.yukonga.miuix.kmp.icon.extended.Back
+import top.yukonga.miuix.kmp.icon.extended.Delete
+import top.yukonga.miuix.kmp.icon.extended.Play
+import top.yukonga.miuix.kmp.icon.extended.SelectAll
+import top.yukonga.miuix.kmp.icon.extended.Sort
+import top.yukonga.miuix.kmp.theme.MiuixTheme
+
+@Composable
+fun FolderDetailScreen(
+    folderPath: String,
+    mainViewModel: MainViewModel,
+    playerViewModel: PlayerViewModel,
+    onBack: () -> Unit,
+    onNavigateToAlbum: (Long) -> Unit = {},
+    onNavigateToArtist: (String) -> Unit = {},
+    onFolderClick: (String) -> Unit,
+    onNavigateToPlayer: () -> Unit
+) {
+    val context = LocalContext.current
+    val songs by mainViewModel.songs.collectAsState()
+    val playlists by mainViewModel.playlists.collectAsState()
+    val currentSong by playerViewModel.currentSong.collectAsState()
+    val favoriteSongKeys by playerViewModel.favoriteSongKeys.collectAsState()
+    val locateCurrentSongRequest by playerViewModel.locateCurrentSongRequest.collectAsState()
+    val openPlayerOnPlay by mainViewModel.settingsManager.openPlayerOnPlay.collectAsState(initial = false)
+    val showPlayNextInLists by mainViewModel.settingsManager.showPlayNextInLists.collectAsState(initial = false)
+    val scanExcludeFolders by mainViewModel.settingsManager.scanExcludeFolders.collectAsState(initial = "")
+    val blockedFolders = remember(scanExcludeFolders) { scanExcludeFolders.toFolderSettingList() }
+    val scope = rememberCoroutineScope()
+    val saveScope = context.findComponentActivity()?.lifecycleScope ?: scope
+    var searchQuery by remember { mutableStateOf("") }
+    var searchExpanded by remember { mutableStateOf(false) }
+    var sortExpanded by remember { mutableStateOf(false) }
+    var actionSong by remember { mutableStateOf<Song?>(null) }
+    var selectionMode by remember { mutableStateOf(false) }
+    var selectedIds by remember { mutableStateOf(setOf<Long>()) }
+    var rangeAnchorId by remember { mutableStateOf<Long?>(null) }
+    var rangeTargetId by remember { mutableStateOf<Long?>(null) }
+    var playlistPickerSongs by remember { mutableStateOf<List<Song>?>(null) }
+    var createPlaylistSongs by remember { mutableStateOf<List<Song>?>(null) }
+    var pendingDeleteSongs by remember { mutableStateOf<List<Song>>(emptyList()) }
+    var pendingSystemDeleteSongs by remember { mutableStateOf<List<Song>>(emptyList()) }
+    var folderToBlock by remember { mutableStateOf<String?>(null) }
+    val persistedSortIndex by mainViewModel.settingsManager.folderDetailSongSortIndex.collectAsState(
+        initial = LibrarySortUiState.folderDetailSongSortIndex
+    )
+    val sortIndex = LibrarySortUiState.pendingFolderDetailSongSortIndex ?: persistedSortIndex
+    val sortMode = FolderSongSortMode.entries.getOrElse(sortIndex) { FolderSongSortMode.Title }
+    LaunchedEffect(persistedSortIndex) {
+        val pendingSortIndex = LibrarySortUiState.pendingFolderDetailSongSortIndex
+        if (pendingSortIndex != null && persistedSortIndex != pendingSortIndex) return@LaunchedEffect
+        LibrarySortUiState.pendingFolderDetailSongSortIndex = null
+        LibrarySortUiState.folderDetailSongSortIndex = persistedSortIndex
+    }
+    fun updateSortMode(mode: FolderSongSortMode) {
+        val nextSortIndex = mode.ordinal
+        if (sortIndex == nextSortIndex) return
+        LibrarySortUiState.pendingFolderDetailSongSortIndex = nextSortIndex
+        LibrarySortUiState.folderDetailSongSortIndex = nextSortIndex
+        saveScope.launch { mainViewModel.settingsManager.setFolderDetailSongSortIndex(nextSortIndex) }
+    }
+    val normalizedFolderPath = remember(folderPath) { folderPath.normalizeFolderPath() }
+    var scrollToTopRequest by remember { mutableStateOf(0) }
+
+    val childFolders = remember(songs, normalizedFolderPath) {
+        songs.childFoldersOf(context, normalizedFolderPath).sortedBy { it.name.musicSortKey() }
+    }
+    val directSongs = remember(songs, normalizedFolderPath) {
+        songs.directSongsInFolder(normalizedFolderPath)
+    }
+    val recursiveSongs = remember(songs, normalizedFolderPath, searchQuery) {
+        if (searchQuery.isBlank()) emptyList() else songs.recursiveSongsInFolder(normalizedFolderPath)
+    }
+    val filteredSongs = remember(directSongs, recursiveSongs, searchQuery) {
+        val sourceSongs = if (searchQuery.isBlank()) directSongs else recursiveSongs
+        if (searchQuery.isBlank()) sourceSongs
+        else sourceSongs.filter {
+            it.title.contains(searchQuery, ignoreCase = true) ||
+                it.artist.contains(searchQuery, ignoreCase = true) ||
+                it.album.contains(searchQuery, ignoreCase = true) ||
+                it.fileName.contains(searchQuery, ignoreCase = true)
+        }
+    }
+    val sortedSongs = remember(filteredSongs, sortMode) {
+        filteredSongs.sortedForFolderDetail(sortMode)
+    }
+    fun clearSelection() {
+        selectedIds = emptySet()
+        rangeAnchorId = null
+        rangeTargetId = null
+        selectionMode = false
+    }
+    fun updateRangeAnchorsForManualSelection(songId: Long, selectedNow: Boolean) {
+        if (selectedNow) {
+            when {
+                rangeAnchorId == null -> rangeAnchorId = songId
+                rangeAnchorId == songId -> Unit
+                else -> rangeTargetId = songId
+            }
+        } else {
+            if (rangeTargetId == songId) rangeTargetId = null
+            if (rangeAnchorId == songId) {
+                rangeAnchorId = rangeTargetId ?: selectedIds.firstOrNull { it != songId }
+                rangeTargetId = null
+            }
+        }
+    }
+    fun toggleSongSelection(songId: Long) {
+        val selecting = songId !in selectedIds
+        selectedIds = if (selecting) selectedIds + songId else selectedIds - songId
+        updateRangeAnchorsForManualSelection(songId, selecting)
+        if (selectedIds.isEmpty()) selectionMode = false
+    }
+    val sortedSongIndexByIdForSelection = remember(sortedSongs) {
+        buildMap {
+            sortedSongs.forEachIndexed { index, song -> put(song.id, index) }
+        }
+    }
+    val selectedVisibleCount = remember(selectedIds, sortedSongs) {
+        sortedSongs.count { it.id in selectedIds }
+    }
+    val rangeSelectionAvailable = remember(sortedSongIndexByIdForSelection, selectedIds, rangeAnchorId, rangeTargetId) {
+        val anchor = rangeAnchorId
+        val target = rangeTargetId
+        anchor != null &&
+            target != null &&
+            anchor != target &&
+            anchor in selectedIds &&
+            target in selectedIds &&
+            anchor in sortedSongIndexByIdForSelection &&
+            target in sortedSongIndexByIdForSelection
+    }
+    fun applyRangeSelection() {
+        val anchor = rangeAnchorId ?: return
+        val target = rangeTargetId ?: return
+        val anchorIndex = sortedSongIndexByIdForSelection[anchor] ?: return
+        val targetIndex = sortedSongIndexByIdForSelection[target] ?: return
+        if (anchorIndex == targetIndex) return
+        val bounds = if (anchorIndex < targetIndex) anchorIndex..targetIndex else targetIndex..anchorIndex
+        selectedIds = selectedIds + bounds.map { sortedSongs[it].id }
+        rangeAnchorId = target
+        rangeTargetId = null
+    }
+    fun toggleSelectAllVisibleSongs() {
+        if (sortedSongs.isEmpty()) return
+        val ids = sortedSongs.mapTo(mutableSetOf()) { it.id }
+        if (ids.all { it in selectedIds }) {
+            selectedIds = selectedIds - ids
+            rangeAnchorId = null
+            rangeTargetId = null
+        } else {
+            selectedIds = selectedIds + ids
+            rangeAnchorId = sortedSongs.firstOrNull()?.id
+            rangeTargetId = sortedSongs.lastOrNull()?.id
+        }
+        selectionMode = true
+    }
+
+    val folderRootName = stringResource(R.string.folder_root)
+    val folderName = remember(normalizedFolderPath, folderRootName) {
+        normalizedFolderPath.folderDisplayName(folderRootName)
+    }
+    val deleteRequestLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult()
+    ) { result ->
+        val songsToDelete = pendingSystemDeleteSongs
+        pendingSystemDeleteSongs = emptyList()
+        if (result.resultCode == Activity.RESULT_OK && songsToDelete.isNotEmpty()) {
+            mainViewModel.removeSongsFromLibrary(songsToDelete)
+            Toast.makeText(context, context.getString(R.string.library_deleted_songs, songsToDelete.size), Toast.LENGTH_SHORT).show()
+            clearSelection()
+        } else if (songsToDelete.isNotEmpty()) {
+            Toast.makeText(context, context.getString(R.string.library_delete_cancelled), Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun deleteSelectedSongs(songsToDelete: List<Song>) {
+        if (songsToDelete.isEmpty()) return
+        scope.launch {
+            val result = mainViewModel.deleteSongsResult(songsToDelete)
+            if (result.isSuccess) {
+                Toast.makeText(context, context.getString(R.string.library_deleted_songs, songsToDelete.size), Toast.LENGTH_SHORT).show()
+                clearSelection()
+                return@launch
+            }
+            val error = result.exceptionOrNull()
+            if (error is WritePermissionRequiredException) {
+                pendingSystemDeleteSongs = songsToDelete
+                deleteRequestLauncher.launch(IntentSenderRequest.Builder(error.intentSender).build())
+            } else {
+                Toast.makeText(context, error?.localizedMessage ?: context.getString(R.string.song_more_metadata_save_failed), Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    BackHandler(enabled = selectionMode || searchExpanded || sortExpanded || folderToBlock != null) {
+        when {
+            folderToBlock != null -> folderToBlock = null
+            selectionMode -> {
+                clearSelection()
+            }
+            searchExpanded -> {
+                searchExpanded = false
+                searchQuery = ""
+            }
+            sortExpanded -> sortExpanded = false
+        }
+    }
+
+    val pageBackground = ellaPageBackground()
+    val overlayColor = wallpaperContentOverlayColor()
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(pageBackground)
+    ) {
+        if (overlayColor.alpha > 0f) {
+            Box(modifier = Modifier.fillMaxSize().background(overlayColor))
+        }
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .windowInsetsPadding(WindowInsets.statusBars)
+        ) {
+        Box {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 4.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(
+                    onClick = {
+                        if (selectionMode) {
+                            clearSelection()
+                        } else {
+                            onBack()
+                        }
+                    }
+                ) {
+                    Icon(
+                        imageVector = MiuixIcons.Regular.Back,
+                        contentDescription = if (selectionMode) stringResource(R.string.common_exit_selection) else stringResource(R.string.common_back),
+                        tint = MiuixTheme.colorScheme.onSurface,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.width(4.dp))
+                if (!selectionMode) {
+                    FolderOutlineIcon(
+                        tint = MiuixTheme.colorScheme.primary,
+                        modifier = Modifier.size(26.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                }
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = if (selectionMode) {
+                            stringResource(R.string.library_selected_fraction, selectedIds.size, sortedSongs.size)
+                        } else {
+                            folderName.ifEmpty { stringResource(R.string.folder_root) }
+                        },
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MiuixTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    if (!selectionMode) {
+                        Text(
+                            text = stringResource(R.string.folder_detail_header_summary, childFolders.size, recursiveSongs.size),
+                            fontSize = 12.sp,
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary
+                        )
+                    }
+                }
+                if (selectionMode) {
+                    IconButton(
+                        onClick = {
+                                val selectedSongs = sortedSongs.filter { it.id in selectedIds }
+                                if (selectedSongs.isEmpty()) {
+                                    Toast.makeText(context, R.string.library_select_songs_first, Toast.LENGTH_SHORT).show()
+                                } else {
+                                    playerViewModel.playNext(selectedSongs)
+                                    Toast.makeText(context, R.string.song_more_added_to_play_next, Toast.LENGTH_SHORT).show()
+                                    clearSelection()
+                                }
+                        }
+                    ) {
+                        Icon(
+                            imageVector = MiuixIcons.Regular.Play,
+                            contentDescription = stringResource(R.string.song_more_play_next),
+                            tint = MiuixTheme.colorScheme.primary,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                    IconButton(
+                        onClick = {
+                                val selectedSongs = sortedSongs.filter { it.id in selectedIds }
+                                if (selectedSongs.isEmpty()) {
+                                    Toast.makeText(context, R.string.library_select_songs_first, Toast.LENGTH_SHORT).show()
+                                } else {
+                                    playlistPickerSongs = selectedSongs
+                                }
+                        }
+                    ) {
+                        Icon(
+                            imageVector = MiuixIcons.Regular.Add,
+                            contentDescription = stringResource(R.string.player_add_to_playlist),
+                            tint = MiuixTheme.colorScheme.primary,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                    IconButton(
+                        onClick = {
+                                val selectedSongs = sortedSongs.filter { it.id in selectedIds }
+                                if (selectedSongs.isNotEmpty()) {
+                                    pendingDeleteSongs = selectedSongs
+                                } else {
+                                    Toast.makeText(context, R.string.library_select_songs_first, Toast.LENGTH_SHORT).show()
+                                }
+                        }
+                    ) {
+                        Icon(
+                            imageVector = MiuixIcons.Regular.Delete,
+                            contentDescription = stringResource(R.string.common_delete),
+                            tint = Color(0xFFE5484D),
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                } else {
+                    IconButton(onClick = {
+                        selectionMode = true
+                        selectedIds = emptySet()
+                        rangeAnchorId = null
+                        rangeTargetId = null
+                    }) {
+                        Icon(
+                            imageVector = MiuixIcons.Regular.SelectAll,
+                            contentDescription = stringResource(R.string.common_multi_select),
+                            tint = MiuixTheme.colorScheme.onSurface,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                    IconButton(onClick = { searchExpanded = !searchExpanded }) {
+                        Icon(
+                            imageVector = MiuixIcons.Basic.Search,
+                            contentDescription = stringResource(R.string.common_search),
+                            tint = MiuixTheme.colorScheme.onSurface,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                    SortDropdownMenu(
+                        items = FolderSongSortMode.entries.map { mode ->
+                            SortDropdownItem(
+                                text = stringResource(mode.labelRes),
+                                selected = sortMode == mode,
+                                onClick = {
+                                    updateSortMode(mode)
+                                }
+                            )
+                        }
+                    )
+                }
+            }
+            DoubleTapScrollOverlay(
+                onDoubleTap = { scrollToTopRequest++ },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp),
+                startPadding = 64.dp,
+                endPadding = 104.dp
+            )
+        }
+
+        AnimatedVisibility(
+            visible = sortExpanded,
+            enter = expandVertically(),
+            exit = shrinkVertically()
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp)
+            ) {
+                FolderSongSortMode.entries.forEach { mode ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                updateSortMode(mode)
+                                sortExpanded = false
+                            }
+                            .padding(vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = stringResource(mode.labelRes),
+                            fontSize = 14.sp,
+                            fontWeight = if (sortMode == mode) FontWeight.Bold else FontWeight.Normal,
+                            color = if (sortMode == mode) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onSurface
+                        )
+                    }
+                }
+            }
+        }
+
+        if (searchExpanded) {
+            EllaSearchBar(
+                query = searchQuery,
+                onQueryChange = { searchQuery = it },
+                onSearch = { searchExpanded = false },
+                placeholder = stringResource(R.string.folder_detail_search_placeholder),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 4.dp)
+            )
+        }
+
+        if (childFolders.isEmpty() && sortedSongs.isEmpty()) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = stringResource(R.string.folder_detail_empty),
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary
+                )
+            }
+        } else {
+            val listState = remember(normalizedFolderPath) { LazyListState() }
+            var fastScrollJob by remember { mutableStateOf<Job?>(null) }
+            LaunchedEffect(scrollToTopRequest) {
+                if (scrollToTopRequest > 0) listState.animateScrollToItem(0)
+            }
+            val sortedSongIndexById = remember(sortedSongs) {
+                buildMap {
+                    sortedSongs.forEachIndexed { index, song -> put(song.id, index) }
+                }
+            }
+            LaunchedEffect(selectionMode, sortedSongs) {
+                if (!selectionMode) return@LaunchedEffect
+                val visibleIds = sortedSongs.mapTo(mutableSetOf()) { it.id }
+                selectedIds = selectedIds.filterTo(mutableSetOf()) { it in visibleIds }
+                if (rangeAnchorId !in visibleIds) rangeAnchorId = selectedIds.firstOrNull()
+                if (rangeTargetId !in visibleIds) rangeTargetId = null
+            }
+            val currentSongItemIndex = remember(sortedSongIndexById, childFolders, searchQuery, currentSong?.id, selectionMode) {
+                if (selectionMode) return@remember -1
+                (currentSong?.id?.let { sortedSongIndexById[it] } ?: -1)
+                    .takeIf { it >= 0 }
+                    ?.plus(if (searchQuery.isBlank()) childFolders.size else 0)
+                    ?: -1
+            }
+            val fastIndexLetters = remember(childFolders, sortedSongs, sortMode, searchQuery) {
+                val folderLetters = if (searchQuery.isBlank()) {
+                    childFolders.map { it.name.musicSortKey().toFastIndexSection() }
+                } else {
+                    emptyList()
+                }
+                val songLetters = if (sortMode == FolderSongSortMode.Title) {
+                    sortedSongs.map { it.indexLetter() }
+                } else {
+                    emptyList()
+                }
+                folderLetters + songLetters
+            }
+            val fastIndexTargets = remember(childFolders, sortedSongs, sortMode, searchQuery) {
+                val folderLetters = if (searchQuery.isBlank()) {
+                    childFolders.map { it.name.musicSortKey().toFastIndexSection() }
+                } else {
+                    emptyList()
+                }
+                val offset = folderLetters.size
+                buildMap {
+                    folderLetters.forEachIndexed { index, letter -> putIfAbsent(letter, index) }
+                    if (sortMode == FolderSongSortMode.Title) {
+                        sortedSongs.forEachIndexed { index, song ->
+                            putIfAbsent(song.indexLetter(), index + offset)
+                        }
+                    }
+                }
+            }
+            val showFastIndex = fastIndexLetters.size > 30 && (childFolders.isNotEmpty() || sortMode == FolderSongSortMode.Title)
+            val showScrollIndicator = !showFastIndex && sortedSongs.size > 30
+            val listEndInset = if (showFastIndex || showScrollIndicator) SideIndexListEndPadding else 0.dp
+            Box(modifier = Modifier.fillMaxSize()) {
+                Column(modifier = Modifier.fillMaxSize()) {
+                    Text(
+                        text = if (searchQuery.isBlank()) {
+                            stringResource(R.string.folder_detail_current_summary, childFolders.size, sortedSongs.size)
+                        } else {
+                            stringResource(R.string.folder_detail_search_summary, sortedSongs.size)
+                        },
+                        fontSize = 13.sp,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                    )
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(end = listEndInset, bottom = 120.dp)
+                    ) {
+                        if (searchQuery.isBlank()) {
+                            items(childFolders, key = { it.path }) { folder ->
+                                ChildFolderRow(
+                                    folder = folder,
+                                    onClick = { onFolderClick(folder.path) },
+                                    onLongClick = { folderToBlock = folder.path }
+                                )
+                            }
+                        }
+                        itemsIndexed(
+                            items = sortedSongs,
+                            key = { _, song -> song.id }
+                        ) { index, song ->
+                            val selected = song.id in selectedIds
+                            val albumArtUri = remember(song.albumId) {
+                                song.albumId
+                                    .takeIf { it > 0L }
+                                    ?.let(mainViewModel::getAlbumArtUri)
+                            }
+                            SongItem(
+                                song = song,
+                                isCurrent = currentSong?.id == song.id,
+                                albumArtUri = albumArtUri,
+                                loadCoverArt = mainViewModel::getCoverArtBitmap,
+                                loadAudioInfo = mainViewModel::getAudioInfo,
+                                showPlayNextInLists = showPlayNextInLists,
+                                isFavorite = song.playlistIdentityKey() in favoriteSongKeys,
+                                loadSongRating = mainViewModel::getSongRating,
+                                selectionMode = selectionMode,
+                                selected = selected,
+                                onLongClick = {
+                                    selectionMode = true
+                                    selectedIds = selectedIds + song.id
+                                    updateRangeAnchorsForManualSelection(song.id, selectedNow = true)
+                                },
+                                onClick = {
+                                    if (selectionMode) {
+                                        toggleSongSelection(song.id)
+                                    } else {
+                                        playerViewModel.setPlaylist(sortedSongs, index)
+                                        if (openPlayerOnPlay) onNavigateToPlayer()
+                                    }
+                                },
+                                onPlayNext = { playerViewModel.playNext(song) },
+                                onMore = { actionSong = song }
+                            )
+                        }
+                    }
+                }
+                if (showFastIndex) {
+                    FastIndexBar(
+                        letters = fastIndexLetters,
+                        modifier = Modifier
+                            .align(Alignment.CenterEnd)
+                            .fillMaxHeight()
+                            .padding(end = 0.dp),
+                        onLetterClick = { letter ->
+                            val index = fastIndexTargets[letter]
+                            if (index != null) {
+                                fastScrollJob?.cancel()
+                                fastScrollJob = scope.launch { listState.scrollToItem(index) }
+                            }
+                        }
+                    )
+                } else if (showScrollIndicator) {
+                    LazyListScrollIndicator(
+                        state = listState,
+                        modifier = Modifier
+                            .align(Alignment.CenterEnd)
+                            .fillMaxHeight()
+                    )
+                }
+                LocateCurrentSongFloatingButton(
+                    listState = listState,
+                    currentItemIndex = currentSongItemIndex,
+                    locateRequest = locateCurrentSongRequest,
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(end = LibraryFloatingControlsEndPadding, bottom = LibraryFloatingControlsBottomPadding)
+                )
+                FloatingSelectionControls(
+                    visible = selectionMode && sortedSongs.isNotEmpty(),
+                    rangeEnabled = rangeSelectionAvailable,
+                    allSelected = sortedSongs.isNotEmpty() && selectedVisibleCount == sortedSongs.size,
+                    onRangeSelect = ::applyRangeSelection,
+                    onSelectAll = ::toggleSelectAllVisibleSongs,
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(end = LibraryFloatingControlsEndPadding, bottom = LibraryFloatingControlsBottomPadding)
+                )
+            }
+        }
+
+        folderToBlock?.let { folderPath ->
+            FolderBlockDialog(
+                folderPath = folderPath,
+                onDismiss = { folderToBlock = null },
+                onBlock = {
+                    scope.launch {
+                        mainViewModel.settingsManager.setScanExcludeFolders(
+                            (blockedFolders + folderPath.normalizeFolderPath()).distinct().joinToString("；")
+                        )
+                        mainViewModel.scanMusic()
+                    }
+                    folderToBlock = null
+                }
+            )
+        }
+
+        SongMoreActionHost(
+            actionSong = actionSong,
+            mainViewModel = mainViewModel,
+            playerViewModel = playerViewModel,
+            onDismissAction = { actionSong = null },
+            onNavigateToAlbum = onNavigateToAlbum,
+            onNavigateToArtist = onNavigateToArtist
+        )
+
+        playlistPickerSongs?.let { songsToAdd ->
+            EllaMiuixBottomSheet(
+                show = true,
+                enableNestedScroll = false,
+                title = stringResource(R.string.song_more_add_to_playlist_title),
+                onDismissRequest = { playlistPickerSongs = null }
+            ) {
+                AddToPlaylistSheet(
+                    playlists = playlists
+                        .sortedWith(compareByDescending<com.ella.music.data.model.UserPlaylist> { it.id == FAVORITES_PLAYLIST_ID }.thenByDescending { it.createdAt }),
+                    songCount = songsToAdd.size,
+                    onDismiss = { playlistPickerSongs = null },
+                    onCreatePlaylist = {
+                        createPlaylistSongs = songsToAdd
+                        playlistPickerSongs = null
+                    },
+                    onPlaylistsConfirm = { selectedPlaylists, appendToEnd ->
+                        selectedPlaylists.forEach { playlist ->
+                            mainViewModel.addSongsToPlaylist(playlist.id, songsToAdd, appendToEnd)
+                        }
+                        Toast.makeText(context, context.getString(R.string.player_added_to_playlists, selectedPlaylists.size), Toast.LENGTH_SHORT).show()
+                        playlistPickerSongs = null
+                        clearSelection()
+                    }
+                )
+            }
+        }
+
+        createPlaylistSongs?.let { songsToAdd ->
+            CreatePlaylistAndAddSelectedSheet(
+                songCount = songsToAdd.size,
+                onDismiss = { createPlaylistSongs = null },
+                onCreate = { name ->
+                    mainViewModel.createPlaylistOrShowDuplicateToast(context, name) { playlist ->
+                        mainViewModel.addSongsToPlaylist(playlist.id, songsToAdd)
+                        Toast.makeText(context, context.getString(R.string.player_added_to_playlist_named, playlist.name), Toast.LENGTH_SHORT).show()
+                        createPlaylistSongs = null
+                        clearSelection()
+                    }
+                }
+            )
+        }
+
+        ConfirmDangerDialog(
+            show = pendingDeleteSongs.isNotEmpty(),
+            title = stringResource(R.string.song_more_delete_song_title),
+            message = stringResource(R.string.library_delete_selected_message, pendingDeleteSongs.size),
+            confirmText = stringResource(R.string.song_more_delete_permanently),
+            onDismiss = { pendingDeleteSongs = emptyList() },
+            onConfirm = {
+                val songsToDelete = pendingDeleteSongs
+                pendingDeleteSongs = emptyList()
+                deleteSelectedSongs(songsToDelete)
+            }
+        )
+    }
+    }
+}

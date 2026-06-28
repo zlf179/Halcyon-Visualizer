@@ -1,0 +1,158 @@
+package com.ella.music.ui.player
+
+import android.content.Context
+import android.graphics.Typeface
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.ui.text.font.Font
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import com.ella.music.R
+import com.ella.music.data.SettingsManager
+
+internal data class PlayerLyricFontState(
+    val fontFamily: FontFamily?,
+    val fontPath: String,
+    val fontWeight: FontWeight,
+    val fontScale: Float,
+    val secondaryFontScale: Float,
+    val compactPrimaryTextSizeSp: Float,
+    val compactSecondaryTextSizeSp: Float,
+    val widePrimaryTextSizeSp: Float,
+    val wideSecondaryTextSizeSp: Float,
+    val shareTypeface: Typeface?
+)
+
+@Composable
+internal fun rememberPlayerLyricFontState(
+    context: Context,
+    settingsManager: SettingsManager
+): PlayerLyricFontState {
+    val lyricFontPath by settingsManager.lyricFontPath.collectAsState(initial = "")
+    val lyricFontWeightValue by settingsManager.lyricFontWeight.collectAsState(initial = 800)
+    val lyricFontScaleValue by settingsManager.lyricFontScale.collectAsState(initial = 100)
+    val lyricSecondaryFontScaleValue by settingsManager.lyricSecondaryFontScale.collectAsState(initial = 100)
+    val lyricCompactPrimaryTextSizeValue by settingsManager.lyricCompactPrimaryTextSize.collectAsState(
+        initial = SettingsManager.LYRIC_COMPACT_PRIMARY_TEXT_SIZE_DEFAULT_SP
+    )
+    val lyricCompactSecondaryTextSizeValue by settingsManager.lyricCompactSecondaryTextSize.collectAsState(
+        initial = SettingsManager.LYRIC_COMPACT_SECONDARY_TEXT_SIZE_DEFAULT_SP
+    )
+    val lyricWidePrimaryTextSizeValue by settingsManager.lyricWidePrimaryTextSize.collectAsState(
+        initial = SettingsManager.LYRIC_WIDE_PRIMARY_TEXT_SIZE_DEFAULT_SP
+    )
+    val lyricWideSecondaryTextSizeValue by settingsManager.lyricWideSecondaryTextSize.collectAsState(
+        initial = SettingsManager.LYRIC_WIDE_SECONDARY_TEXT_SIZE_DEFAULT_SP
+    )
+    val lyricShareUseLyricFont by settingsManager.lyricShareUseLyricFont.collectAsState(initial = false)
+    val lyricFontApplyToPage by settingsManager.lyricFontApplyToPage.collectAsState(initial = true)
+    val bundledDefaultLyricFontPath = remember(context) { ensureBundledMiSansSemiboldPath(context) }
+    val preferBundledLyricFontByDefault = remember { !isXiaomiFamilyPlayerDevice() }
+    val defaultLyricFontPath = remember(preferBundledLyricFontByDefault, bundledDefaultLyricFontPath) {
+        bundledDefaultLyricFontPath.takeIf { preferBundledLyricFontByDefault }
+    }
+    val effectiveLyricFontPath = remember(lyricFontPath, defaultLyricFontPath) {
+        lyricFontPath.ifBlank { defaultLyricFontPath.orEmpty() }
+    }
+    val effectiveLyricFontWeightValue = remember(lyricFontWeightValue, lyricFontPath, defaultLyricFontPath) {
+        when {
+            lyricFontPath.isNotBlank() -> lyricFontWeightValue
+            defaultLyricFontPath != null -> 800
+            else -> lyricFontWeightValue
+        }
+    }
+    val defaultLyricFontFamily = remember(preferBundledLyricFontByDefault) {
+        if (!preferBundledLyricFontByDefault) {
+            null
+        } else {
+            FontFamily(
+                Font(
+                    resId = R.font.misans_semibold,
+                    weight = FontWeight(800)
+                )
+            )
+        }
+    }
+    val lyricFontFamily = remember(effectiveLyricFontPath, effectiveLyricFontWeightValue, defaultLyricFontFamily) {
+        effectiveLyricFontPath.toPlayerLyricFontFamily(
+            weight = effectiveLyricFontWeightValue,
+            italic = false
+        ) ?: defaultLyricFontFamily
+    }
+    val lyricFontWeight = remember(effectiveLyricFontWeightValue) {
+        FontWeight(effectiveLyricFontWeightValue.coerceIn(100, 900))
+    }
+    val lyricFontScale = remember(lyricFontScaleValue) {
+        lyricFontScaleValue.coerceIn(
+            SettingsManager.LYRIC_FONT_SCALE_MIN,
+            SettingsManager.LYRIC_FONT_SCALE_ULTRA_WIDE_MAX
+        ) / 100f
+    }
+    val lyricSecondaryFontScale = remember(lyricSecondaryFontScaleValue) {
+        lyricSecondaryFontScaleValue.coerceIn(
+            SettingsManager.LYRIC_SECONDARY_FONT_SCALE_MIN,
+            SettingsManager.LYRIC_SECONDARY_FONT_SCALE_ULTRA_WIDE_MAX
+        ) / 100f
+    }
+    val lyricCompactPrimaryTextSize = remember(lyricCompactPrimaryTextSizeValue) {
+        lyricCompactPrimaryTextSizeValue.coerceIn(
+            SettingsManager.LYRIC_COMPACT_PRIMARY_TEXT_SIZE_MIN_SP,
+            SettingsManager.LYRIC_COMPACT_PRIMARY_TEXT_SIZE_MAX_SP
+        ).toFloat()
+    }
+    val lyricCompactSecondaryTextSize = remember(lyricCompactSecondaryTextSizeValue) {
+        lyricCompactSecondaryTextSizeValue.coerceIn(
+            SettingsManager.LYRIC_COMPACT_SECONDARY_TEXT_SIZE_MIN_SP,
+            SettingsManager.LYRIC_COMPACT_SECONDARY_TEXT_SIZE_MAX_SP
+        ).toFloat()
+    }
+    val lyricWidePrimaryTextSize = remember(lyricWidePrimaryTextSizeValue) {
+        lyricWidePrimaryTextSizeValue.coerceIn(
+            SettingsManager.LYRIC_WIDE_PRIMARY_TEXT_SIZE_MIN_SP,
+            SettingsManager.LYRIC_WIDE_PRIMARY_TEXT_SIZE_MAX_SP
+        ).toFloat()
+    }
+    val lyricWideSecondaryTextSize = remember(lyricWideSecondaryTextSizeValue) {
+        lyricWideSecondaryTextSizeValue.coerceIn(
+            SettingsManager.LYRIC_WIDE_SECONDARY_TEXT_SIZE_MIN_SP,
+            SettingsManager.LYRIC_WIDE_SECONDARY_TEXT_SIZE_MAX_SP
+        ).toFloat()
+    }
+    val lyricShareTypeface = remember(lyricShareUseLyricFont, effectiveLyricFontPath, effectiveLyricFontWeightValue) {
+        if (lyricShareUseLyricFont) {
+            effectiveLyricFontPath.toPlayerLyricTypeface(effectiveLyricFontWeightValue)
+        } else {
+            null
+        }
+    }
+
+    return PlayerLyricFontState(
+        // fontFamily drives the PlayerSongMetaText group (song title + artist + annotation) on
+        // the player/lyrics pages. When the "apply font to page" toggle is off, return null so
+        // those texts fall back to the global app font, leaving the lyric body font untouched.
+        fontFamily = if (lyricFontApplyToPage) lyricFontFamily else null,
+        fontPath = effectiveLyricFontPath,
+        fontWeight = lyricFontWeight,
+        fontScale = lyricFontScale,
+        secondaryFontScale = lyricSecondaryFontScale,
+        compactPrimaryTextSizeSp = lyricCompactPrimaryTextSize,
+        compactSecondaryTextSizeSp = lyricCompactSecondaryTextSize,
+        widePrimaryTextSizeSp = lyricWidePrimaryTextSize,
+        wideSecondaryTextSizeSp = lyricWideSecondaryTextSize,
+        shareTypeface = lyricShareTypeface
+    )
+}
+
+internal fun PlayerLyricFontState.primaryTextSizeSp(profile: PlayerLyricLayoutProfile): Float =
+    when (profile) {
+        PlayerLyricLayoutProfile.Wide -> widePrimaryTextSizeSp
+        PlayerLyricLayoutProfile.Compact -> compactPrimaryTextSizeSp
+    }
+
+internal fun PlayerLyricFontState.secondaryTextSizeSp(profile: PlayerLyricLayoutProfile): Float =
+    when (profile) {
+        PlayerLyricLayoutProfile.Wide -> wideSecondaryTextSizeSp
+        PlayerLyricLayoutProfile.Compact -> compactSecondaryTextSizeSp
+    }

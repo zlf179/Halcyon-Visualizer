@@ -1,0 +1,64 @@
+package com.ella.music.ui.artist
+
+import androidx.annotation.StringRes
+import com.ella.music.R
+import com.ella.music.data.model.Album
+import com.ella.music.data.model.Song
+import com.ella.music.ui.listmodel.SortDirection
+import com.ella.music.ui.listmodel.sortedByReleaseDate
+import java.util.Locale
+
+internal enum class ArtistDetailSongSortMode(@param:StringRes val labelRes: Int) {
+    Title(R.string.artist_sort_title),
+    AlbumTrack(R.string.artist_sort_album_track),
+    FileName(R.string.artist_sort_file_name),
+    Duration(R.string.artist_sort_duration),
+    DateAdded(R.string.artist_sort_date_added),
+    DateAddedAsc(R.string.artist_sort_date_added_asc),
+    DateModified(R.string.artist_sort_date_modified),
+    DateModifiedAsc(R.string.artist_sort_date_modified_asc),
+    YearAsc(R.string.artist_sort_year_asc),
+    YearDesc(R.string.artist_sort_year_desc)
+}
+
+internal fun List<Song>.sortedForArtistDetail(mode: ArtistDetailSongSortMode): List<Song> {
+    return when (mode) {
+        ArtistDetailSongSortMode.Title -> sortedBy { it.title.lowercase(Locale.ROOT) }
+        ArtistDetailSongSortMode.AlbumTrack -> sortedWith(
+            compareBy<Song> { it.album.lowercase(Locale.ROOT) }
+                .thenBy { if (it.discNumber > 0) it.discNumber else Int.MAX_VALUE }
+                .thenBy { if (it.trackNumber > 0) it.trackNumber else Int.MAX_VALUE }
+                .thenBy { it.title.lowercase(Locale.ROOT) }
+        )
+        ArtistDetailSongSortMode.FileName -> sortedBy { it.fileName.ifBlank { it.path.substringAfterLast('/') }.lowercase(Locale.ROOT) }
+        ArtistDetailSongSortMode.Duration -> sortedByDescending { it.duration }
+        ArtistDetailSongSortMode.YearAsc -> sortedByReleaseDate(SortDirection.Ascending)
+        ArtistDetailSongSortMode.YearDesc -> sortedByReleaseDate(SortDirection.Descending)
+        ArtistDetailSongSortMode.DateAdded -> sortedByDescending { it.dateAdded }
+        ArtistDetailSongSortMode.DateAddedAsc -> sortedBy { it.dateAdded }
+        ArtistDetailSongSortMode.DateModified -> sortedByDescending { it.dateModified }
+        ArtistDetailSongSortMode.DateModifiedAsc -> sortedBy { it.dateModified }
+    }
+}
+
+internal enum class ArtistDetailAlbumSortMode(@param:StringRes val labelRes: Int) {
+    YearAsc(R.string.artist_sort_year_asc),
+    YearDesc(R.string.artist_sort_year_desc),
+    SongCount(R.string.artist_sort_song_count),
+    Duration(R.string.artist_sort_duration),
+    Name(R.string.artist_sort_album_name)
+}
+
+internal fun List<Album>.sortedForArtistAlbumDetail(
+    mode: ArtistDetailAlbumSortMode,
+    durations: Map<Long, Long>
+): List<Album> {
+    return when (mode) {
+        ArtistDetailAlbumSortMode.YearAsc -> sortedWith(compareBy<Album> { it.yearInt <= 0 }.thenBy { it.yearInt }.thenBy { it.name.lowercase(Locale.ROOT) })
+        ArtistDetailAlbumSortMode.YearDesc -> sortedWith(compareBy<Album> { it.yearInt <= 0 }.thenByDescending { it.yearInt }.thenBy { it.name.lowercase(Locale.ROOT) })
+        ArtistDetailAlbumSortMode.SongCount -> sortedByDescending { it.songCount }
+        ArtistDetailAlbumSortMode.Duration -> sortedByDescending { durations[it.id] ?: 0L }
+        ArtistDetailAlbumSortMode.Name -> sortedBy { it.name.lowercase(Locale.ROOT) }
+    }
+}
+

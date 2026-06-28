@@ -1,0 +1,865 @@
+package com.ella.music.ui.player
+
+import android.content.Context
+import android.app.Activity
+import android.media.AudioManager
+import android.content.Intent
+import android.content.ContextWrapper
+import android.content.pm.ActivityInfo
+import android.os.Build
+import android.os.Environment
+import android.provider.Settings
+import android.util.Log
+import android.view.View
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.IntentSenderRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.text.BasicText
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.TextUnit
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupProperties
+import androidx.compose.ui.zIndex
+import androidx.core.view.WindowCompat
+import com.ella.music.R
+import com.ella.music.data.SettingsManager
+import com.ella.music.data.normalizedAudioFormat
+import com.ella.music.data.parser.LrcParser
+import com.ella.music.data.splitArtistNames
+import com.ella.music.data.tagIdentityKey
+import com.ella.music.data.model.AudioInfo
+import com.ella.music.data.model.LyricLine
+import com.ella.music.data.model.Song
+import com.ella.music.data.model.playlistIdentityKey
+import com.ella.music.player.PlaybackAudioSession
+import com.ella.music.ui.components.LyricVideoProgress
+import com.ella.music.ui.components.LyricVideoShareProgressOverlay
+import com.ella.music.ui.components.TagEditorOptionKind
+import com.ella.music.ui.components.generateLyricVideo
+import com.ella.music.ui.components.shareLyricCard
+import com.ella.music.ui.components.shareLyricVideoFile
+import com.ella.music.viewmodel.MainViewModel
+import com.ella.music.viewmodel.PlayerViewModel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
+import kotlin.math.abs
+import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.ln
+import kotlin.math.sqrt
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.IconButton
+import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.extended.Back
+import top.yukonga.miuix.kmp.icon.extended.Music
+import top.yukonga.miuix.kmp.icon.extended.Photos
+import top.yukonga.miuix.kmp.theme.MiuixTheme
+
+@Composable
+fun PlayerScreen(
+    mainViewModel: MainViewModel,
+    playerViewModel: PlayerViewModel,
+    onBack: () -> Unit,
+    onNavigateToAlbum: (Long) -> Unit = {},
+    onNavigateToArtist: (String) -> Unit = {},
+    onNavigateToMetadataCategory: (String, String) -> Unit = { _, _ -> },
+    onNavigateToEqualizer: () -> Unit = {},
+    onDismissProgressChange: (Float) -> Unit = {},
+    openToken: Int = 0,
+    playerVisible: Boolean = true
+) {
+    val context = LocalContext.current
+    val configuration = LocalConfiguration.current
+    val uriHandler = LocalUriHandler.current
+    val view = LocalView.current
+    val isLargeScreenDevice = configuration.smallestScreenWidthDp >= 600
+    val scope = rememberCoroutineScope()
+    val settingsManager = remember { SettingsManager.getInstance(context) }
+    val playerSettings = rememberPlayerScreenSettings(settingsManager)
+    val playerTapSeekEnabled = playerSettings.playerTapSeekEnabled
+    val playerShowTotalDuration = playerSettings.playerShowTotalDuration
+    val coverSwipeEnabled = playerSettings.coverSwipeEnabled
+    val lyricParserEngine = playerSettings.lyricParserEngine
+    val playerTitlePosition = playerSettings.playerTitlePosition
+    val playerKeepScreenOn = playerSettings.playerKeepScreenOn
+    val lyricSourceMode = playerSettings.lyricSourceMode
+    val lyricFontState = rememberPlayerLyricFontState(context, settingsManager)
+    val lyricFontFamily = lyricFontState.fontFamily
+    val effectiveLyricFontPath = lyricFontState.fontPath
+    val lyricFontWeight = lyricFontState.fontWeight
+    val lyricLayoutProfile = remember(
+        configuration.screenWidthDp,
+        configuration.screenHeightDp,
+        configuration.smallestScreenWidthDp
+    ) {
+        resolvePlayerLyricLayoutProfile(
+            screenWidthDp = configuration.screenWidthDp,
+            screenHeightDp = configuration.screenHeightDp,
+            smallestScreenWidthDp = configuration.smallestScreenWidthDp
+        )
+    }
+    val lyricUltraWideScaleEnabled = remember(configuration.screenWidthDp, configuration.screenHeightDp) {
+        isUltraWideLandscapePlayerLayout(
+            screenWidthDp = configuration.screenWidthDp,
+            screenHeightDp = configuration.screenHeightDp
+        )
+    }
+    val lyricFontScaleRange = remember(lyricLayoutProfile, lyricUltraWideScaleEnabled) {
+        lyricLayoutProfile.primaryScaleRangePercent(lyricUltraWideScaleEnabled)
+    }
+    val lyricSecondaryFontScaleRange = remember(lyricLayoutProfile, lyricUltraWideScaleEnabled) {
+        lyricLayoutProfile.secondaryScaleRangePercent(lyricUltraWideScaleEnabled)
+    }
+    val lyricFontScale = lyricFontState.fontScale.coerceIn(
+        lyricFontScaleRange.first / 100f,
+        lyricFontScaleRange.last / 100f
+    )
+    val lyricSecondaryFontScale = lyricFontState.secondaryFontScale.coerceIn(
+        lyricSecondaryFontScaleRange.first / 100f,
+        lyricSecondaryFontScaleRange.last / 100f
+    )
+    val lyricPrimaryTextSizeSp = lyricFontState.primaryTextSizeSp(lyricLayoutProfile)
+    val lyricSecondaryTextSizeSp = lyricFontState.secondaryTextSizeSp(lyricLayoutProfile)
+    val lyricShareTypeface = lyricFontState.shareTypeface
+    val currentSong by playerViewModel.currentSong.collectAsState()
+    val currentSongKey = remember(currentSong) { currentSong?.playlistIdentityKey() }
+    val isPlaying by playerViewModel.isPlaying.collectAsState()
+    val currentPosition = rememberThrottledPlayerPosition(
+        positionFlow = playerViewModel.currentPosition,
+        isPlaying = isPlaying,
+        anchorKey = currentSongKey,
+        livePositionProvider = playerViewModel::livePositionMs
+    )
+    val duration by playerViewModel.duration.collectAsState()
+    val shuffleEnabled by playerViewModel.shuffleEnabled.collectAsState()
+    val repeatMode by playerViewModel.repeatMode.collectAsState()
+    val playbackSpeed by playerViewModel.playbackSpeed.collectAsState()
+    val playbackPitch by playerViewModel.playbackPitch.collectAsState()
+    val audioSessionId by PlaybackAudioSession.audioSessionId.collectAsState()
+    val audioVisualizerEnabled = playerSettings.audioVisualizerEnabled
+    val audioVisualizerOpacity = playerSettings.audioVisualizerOpacity / 100f
+    val dynamicCoverEnabled = playerSettings.dynamicCoverEnabled
+    val dynamicCoverCustomFolders = playerSettings.dynamicCoverCustomFolders
+    val immersiveAlbumCover = playerSettings.immersiveAlbumCover
+    val playerBackgroundEnabled = playerSettings.playerBackgroundEnabled
+    val playerBackgroundUri = playerSettings.playerBackgroundUri
+    val playerBackgroundOpacity = playerSettings.playerBackgroundOpacity / 100f
+    val playerBackgroundDim = playerSettings.playerBackgroundDim / 100f
+    val beautifulLyricsBackground = playerSettings.beautifulLyricsBackground
+    val hiResLogoEnabled = playerSettings.hiResLogoEnabled
+    val hiResLogoUri = playerSettings.hiResLogoUri
+    val lyricShareCustomInfo = playerSettings.lyricShareCustomInfo
+    val metadataEditorId = playerSettings.metadataEditorId
+    val lyricTimingEditorId = playerSettings.lyricTimingEditorId
+    val sleepTimerCustomMinutes = playerSettings.sleepTimerCustomMinutes
+    val sleepTimerStopAfterCurrent = playerSettings.sleepTimerStopAfterCurrent
+    val playlists by mainViewModel.playlists.collectAsState()
+    val playlist by playerViewModel.playlist.collectAsState()
+    val lyrics by playerViewModel.lyrics.collectAsState()
+    val lyricsLoading by playerViewModel.lyricsLoading.collectAsState()
+    val lyricFormatAvailability by playerViewModel.lyricFormatAvailability.collectAsState()
+    val preferTtmlLyrics by playerViewModel.preferTtmlLyrics.collectAsState()
+    val currentLyricOffsetMs by playerViewModel.currentLyricOffsetMs.collectAsState()
+    val currentLyricIndex by playerViewModel.currentLyricIndex.collectAsState()
+    val showLyrics by playerViewModel.showLyrics.collectAsState()
+    val showLyricTranslation by playerViewModel.showLyricTranslation.collectAsState()
+    val showLyricPronunciation by playerViewModel.showLyricPronunciation.collectAsState()
+    val lyricPageKeepScreenOn = playerSettings.lyricPageKeepScreenOn
+    val lyricPerspectiveEffect = playerSettings.lyricPerspectiveEffect
+    val lyricPerspectiveYAngle = playerSettings.lyricPerspectiveYAngle
+    val playerLyricTextAlign = playerSettings.playerLyricTextAlign
+    val favoriteSongKeys by playerViewModel.favoriteSongKeys.collectAsState()
+    val sleepTimerEndRealtimeMs by playerViewModel.sleepTimerEndRealtimeMs.collectAsState()
+    val stopAfterCurrentEnabled by playerViewModel.stopAfterCurrentEnabled.collectAsState()
+    val currentLyricLine = lyrics.getOrNull(currentLyricIndex)
+    val miniLyricLine = currentLyricLine
+        ?.takeIf { it.hasMiniLyric() }
+        ?: lyrics.firstOrNull { it.hasMiniLyric() }
+    val uiState = rememberPlayerScreenUiState()
+    val landscapeState = rememberPlayerLandscapeUiState()
+    val visualizerPermissionState = rememberPlayerVisualizerPermissionState(
+        context = context,
+        scope = scope,
+        settingsManager = settingsManager,
+        immersiveAlbumCover = immersiveAlbumCover,
+        audioVisualizerEnabled = audioVisualizerEnabled,
+        isPlaying = isPlaying,
+        showLyrics = showLyrics,
+        landscapeExpanded = landscapeState.expanded,
+        largeScreenDevice = isLargeScreenDevice
+    )
+    val effectiveAudioVisualizerEnabled = visualizerPermissionState.effectiveEnabled
+    val setAudioVisualizerEnabled = visualizerPermissionState.setEnabled
+    val deletePermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            uiState.pendingWriteRetry?.let { retry ->
+                scope.launch { retry() }
+            }
+            uiState.pendingWriteRetry = null
+        } else {
+            uiState.pendingWriteRetry = null
+        }
+    }
+    if (playerVisible) {
+        PlayerSystemBarsEffect(
+            context = context,
+            view = view,
+            trigger = landscapeState.expanded
+        )
+        PlayerSurfaceKeepScreenOnEffect(
+            view = view,
+            keepScreenOn = (showLyrics && lyricPageKeepScreenOn) || (isLargeScreenDevice && playerKeepScreenOn)
+        )
+    }
+
+    val song = currentSong
+    val isCurrentSongFavorite = song?.playlistIdentityKey()?.let { it in favoriteSongKeys } == true
+    fun requestDeleteSong(targetSong: Song) {
+        uiState.deleteConfirmSong = targetSong
+    }
+    val playerBackgroundTheme by settingsManager.playerBackgroundTheme
+        .collectAsState(initial = SettingsManager.PLAYER_BG_THEME_FOLLOW_SYSTEM)
+    val playerLight = when (playerBackgroundTheme) {
+        SettingsManager.PLAYER_BG_THEME_LIGHT -> true
+        SettingsManager.PLAYER_BG_THEME_DARK -> false
+        // Follow the app's effective theme (which itself follows the system or an in-app override),
+        // not the raw OS dark mode, so the player tracks an in-app light/dark switch too.
+        else -> MiuixTheme.colorScheme.background.luminance() >= 0.5f
+    }
+    val songPresentation = rememberPlayerSongPresentationState(
+        context = context,
+        song = song,
+        playerViewModel = playerViewModel,
+        playerLight = playerLight
+    )
+    val embeddedCover = songPresentation.embeddedCover
+    val paletteBitmap = songPresentation.paletteBitmap
+    val palette = songPresentation.palette
+    val lyricPalette = songPresentation.lyricPalette
+    val audioInfo = songPresentation.audioInfo
+    val tagInfo = songPresentation.tagInfo
+    val songAnnotation = songPresentation.annotation
+    val displayAnnotation = if (playerSettings.showSongAnnotation) songAnnotation else ""
+    val neteaseInfo = songPresentation.neteaseInfo
+    val lyricVideoShareEnabled = remember(song?.path, song?.mimeType, audioInfo?.format, audioInfo?.sampleRate, audioInfo?.bitDepth) {
+        !isLyricVideoShareUnsupported(song, audioInfo)
+    }
+    var lyricShareInitialLine by remember { mutableStateOf<LyricLine?>(null) }
+    fun openLyricSharePicker(line: LyricLine) {
+        lyricShareInitialLine = line
+    }
+    fun shareSelectedLyrics(lines: List<LyricLine>, includeTranslation: Boolean) {
+        shareLyricCard(
+            context = context,
+            song = song,
+            lines = lines,
+            cover = embeddedCover ?: paletteBitmap,
+            backgroundColors = listOf(
+                palette.top.toArgb(),
+                palette.middle.toArgb(),
+                palette.bottom.toArgb()
+            ),
+            annotation = songAnnotation,
+            customInfo = lyricShareCustomInfo,
+            shareTypeface = lyricShareTypeface,
+            includeTranslation = includeTranslation
+        )
+        lyricShareInitialLine = null
+    }
+    var videoShareProgress by remember { mutableStateOf<LyricVideoProgress?>(null) }
+    var videoShareGenerating by remember { mutableStateOf(false) }
+    var videoShareJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    fun shareSelectedLyricsVideo(lines: List<LyricLine>, includeTranslation: Boolean) {
+        lyricShareInitialLine = null
+        videoShareGenerating = true
+        videoShareProgress = LyricVideoProgress(0, 1)
+        videoShareJob = scope.launch {
+            val uri = generateLyricVideo(
+                context = context,
+                song = song,
+                lines = lines,
+                cover = embeddedCover ?: paletteBitmap,
+                includeTranslation = includeTranslation,
+                typeface = lyricShareTypeface,
+                onProgress = { progress -> videoShareProgress = progress }
+            )
+            videoShareGenerating = false
+            videoShareProgress = null
+            videoShareJob = null
+            if (uri != null) {
+                withContext(Dispatchers.Main) {
+                    shareLyricVideoFile(context, uri)
+                }
+            } else {
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(context, context.getString(R.string.lyric_video_share_failed), Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+    fun navigateToArtistOrChoose(artistText: String) {
+        val artists = splitArtistNames(artistText)
+            .distinctBy { it.tagIdentityKey() }
+        when (artists.size) {
+            0 -> Toast.makeText(context, context.getString(R.string.player_no_artist_jump), Toast.LENGTH_SHORT).show()
+            1 -> onNavigateToArtist(artists.first())
+            else -> uiState.artistChoices = artists
+        }
+    }
+    fun openNetease(url: String?) {
+        if (url.isNullOrBlank()) {
+            Toast.makeText(context, context.getString(R.string.player_no_netease_jump), Toast.LENGTH_SHORT).show()
+        } else {
+            uriHandler.openUri(url)
+        }
+    }
+    val playerPagerState = rememberPagerState(
+        initialPage = PLAYER_PAGE_COVER,
+        pageCount = { PLAYER_PAGE_COUNT }
+    )
+    LaunchedEffect(openToken) {
+        if (playerPagerState.currentPage != PLAYER_PAGE_COVER) {
+            playerPagerState.scrollToPage(PLAYER_PAGE_COVER)
+        }
+    }
+    // Sync the lyric parser engine setting to the LrcParser singleton at runtime.
+    LaunchedEffect(lyricParserEngine) {
+        LrcParser.parserEngine = lyricParserEngine
+    }
+    PlayerPagerSyncEffects(
+        immersiveAlbumCover = immersiveAlbumCover,
+        showLyrics = showLyrics,
+        pagerState = playerPagerState,
+        onShowLyricsChange = playerViewModel::setShowLyrics
+    )
+
+    PlayerDismissMotionHost(
+        openToken = openToken,
+        onDismissProgressChange = onDismissProgressChange,
+        backEnabled = playerVisible,
+        onDismiss = {
+            playerViewModel.setShowLyrics(false)
+            onBack()
+        },
+        overlayContent = {
+            PlayerLyricShareHost(
+                song = song,
+                lyrics = lyrics,
+                initialLine = lyricShareInitialLine,
+                embeddedCover = embeddedCover,
+                paletteBitmap = paletteBitmap,
+                palette = palette,
+                annotation = songAnnotation,
+                customInfo = lyricShareCustomInfo,
+                shareTypeface = lyricShareTypeface,
+                onDismiss = { lyricShareInitialLine = null },
+                onShare = ::shareSelectedLyrics,
+                onVideoShare = if (lyricVideoShareEnabled) ::shareSelectedLyricsVideo else null
+            )
+            LyricVideoShareProgressOverlay(
+                visible = videoShareGenerating,
+                progress = videoShareProgress,
+                onCancel = {
+                    videoShareJob?.cancel()
+                    videoShareJob = null
+                    videoShareGenerating = false
+                    videoShareProgress = null
+                }
+            )
+        }
+    ) { dismissingPlayer ->
+        Box(modifier = Modifier.fillMaxSize()) {
+          CompositionLocalProvider(LocalPlayerContentColor provides palette.onBackground) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                palette.top,
+                                palette.middle,
+                                palette.bottom
+                            )
+                        )
+                    )
+            )
+            // The immersive flow effect is a dark wash; skip it under a light player theme so the
+            // light gradient stays light.
+            if (!playerLight) {
+                ImmersiveCoverBackground(
+                    palette = palette,
+                    flowEffectMode = SettingsManager.PLAYER_FLOW_EFFECT_DARK,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+            if (!immersiveAlbumCover) {
+                SharedPlayerPageBackground(
+                    song = song,
+                    embeddedCover = embeddedCover,
+                    paletteBitmap = paletteBitmap,
+                    palette = lyricPalette,
+                    currentPositionMs = currentPosition,
+                    isPlaying = isPlaying,
+                    playerBackgroundEnabled = playerBackgroundEnabled,
+                    playerBackgroundUri = playerBackgroundUri,
+                    playerBackgroundOpacity = playerBackgroundOpacity,
+                    playerBackgroundDim = playerBackgroundDim,
+                    beautifulLyricsBackground = beautifulLyricsBackground,
+                    useBlurBackground = false,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+
+            PlayerScreenPageHost(
+                immersiveAlbumCover = immersiveAlbumCover,
+                showLyrics = showLyrics,
+                pagerState = playerPagerState,
+                userScrollEnabled = !dismissingPlayer,
+                onShowImmersiveLyrics = { playerViewModel.setShowLyrics(true) },
+                onDismissImmersiveLyrics = { playerViewModel.setShowLyrics(false) },
+                onShowPagedLyrics = {
+                    scope.launch { playerPagerState.animateScrollToPage(PLAYER_PAGE_LYRICS) }
+                },
+                onDismissPagedLyrics = {
+                    scope.launch { playerPagerState.animateScrollToPage(PLAYER_PAGE_COVER) }
+                },
+                coverPage = { onShowLyrics, pageModifier ->
+                    CoverPageContent(
+                        context = context,
+                        mainViewModel = mainViewModel,
+                        playerViewModel = playerViewModel,
+                        settingsManager = settingsManager,
+                        scope = scope,
+                        song = song,
+                        embeddedCover = embeddedCover,
+                        paletteBitmap = paletteBitmap,
+                        songAnnotation = displayAnnotation,
+                        dynamicCoverFailedPath = uiState.dynamicCoverFailedPath,
+                        dynamicCoverEnabled = dynamicCoverEnabled,
+                        dynamicCoverCustomFolders = dynamicCoverCustomFolders,
+                        immersiveAlbumCover = immersiveAlbumCover,
+                        playerBackgroundEnabled = playerBackgroundEnabled,
+                        playerBackgroundUri = playerBackgroundUri,
+                        playerBackgroundOpacity = playerBackgroundOpacity,
+                        playerBackgroundDim = playerBackgroundDim,
+                        beautifulLyricsBackground = beautifulLyricsBackground,
+                        hiResLogoEnabled = hiResLogoEnabled,
+                        hiResLogoUri = hiResLogoUri,
+                        isPlaying = isPlaying,
+                        currentPosition = currentPosition,
+                        duration = duration,
+                        shuffleEnabled = shuffleEnabled,
+                        repeatMode = repeatMode,
+                        audioInfo = audioInfo,
+                        palette = palette,
+                        lyricPalette = lyricPalette,
+                        lyrics = lyrics,
+                        lyricsLoading = lyricsLoading,
+                        currentLyricIndex = currentLyricIndex,
+                        miniLyricLine = miniLyricLine,
+                        showLyricTranslation = showLyricTranslation,
+                        showLyricPronunciation = showLyricPronunciation,
+                        lyricPageKeepScreenOn = lyricPageKeepScreenOn,
+                        lyricFormatAvailability = lyricFormatAvailability,
+                        preferTtmlLyrics = preferTtmlLyrics,
+                        lyricSourceMode = lyricSourceMode,
+                        lyricParserEngine = lyricParserEngine,
+                        lyricLayoutProfile = lyricLayoutProfile,
+                        lyricFontFamily = lyricFontFamily,
+                        effectiveLyricFontPath = effectiveLyricFontPath,
+                        lyricFontWeight = lyricFontWeight,
+                        lyricFontScale = lyricFontScale,
+                        lyricSecondaryFontScale = lyricSecondaryFontScale,
+                        lyricPrimaryTextSizeSp = lyricPrimaryTextSizeSp,
+                        lyricSecondaryTextSizeSp = lyricSecondaryTextSizeSp,
+                        lyricPerspectiveEffect = lyricPerspectiveEffect,
+                        lyricPerspectiveYAngle = lyricPerspectiveYAngle,
+                        lyricTextAlign = playerLyricTextAlign,
+                        playerTapSeekEnabled = playerTapSeekEnabled,
+                        playerShowTotalDuration = playerShowTotalDuration,
+                        coverSwipeEnabled = coverSwipeEnabled,
+                        playerTitlePosition = playerTitlePosition,
+                        showPlayerKeepScreenOnAction = isLargeScreenDevice,
+                        playerKeepScreenOn = playerKeepScreenOn,
+                        menuExpanded = uiState.menuExpanded,
+                        onMenuExpandedChange = { uiState.menuExpanded = it },
+                        queueExpanded = uiState.queueExpanded,
+                        onQueueExpandedChange = { uiState.queueExpanded = it },
+                        playlist = playlist,
+                        sleepTimerEndRealtimeMs = sleepTimerEndRealtimeMs,
+                        stopAfterCurrentEnabled = stopAfterCurrentEnabled,
+                        sleepTimerCustomMinutes = sleepTimerCustomMinutes,
+                        sleepTimerStopAfterCurrent = sleepTimerStopAfterCurrent,
+                        playbackSpeed = playbackSpeed,
+                        playbackPitch = playbackPitch,
+                        isCurrentSongFavorite = isCurrentSongFavorite,
+                        audioSessionId = audioSessionId,
+                        audioVisualizerEnabled = audioVisualizerEnabled,
+                        audioVisualizerOpacity = audioVisualizerOpacity,
+                        audioVisualizerOpacityPercent = playerSettings.audioVisualizerOpacity,
+                        lyricOffsetMs = currentLyricOffsetMs,
+                        metadataEditorId = metadataEditorId,
+                        lyricTimingEditorId = lyricTimingEditorId,
+                        onVisualizerEnabled = setAudioVisualizerEnabled,
+                        onVisualizerOpacityChange = {
+                            scope.launch { settingsManager.setAudioVisualizerOpacity(it) }
+                        },
+                        onPlayerKeepScreenOnChange = {
+                            scope.launch { settingsManager.setPlayerKeepScreenOn(it) }
+                        },
+                        onDynamicCoverFailedPathChange = { uiState.dynamicCoverFailedPath = it },
+                        onDynamicCoverSheetSongChange = { uiState.dynamicCoverSheetSong = it },
+                        onPlaylistPickerSongChange = { uiState.playlistPickerSong = it },
+                        onPlaylistPickerSongsChange = { uiState.playlistPickerSongs = it },
+                        onLandscapeCoverModeChange = { landscapeState.coverMode = it },
+                        onLandscapeExpandedChange = { landscapeState.expanded = it },
+                        onSongInfoExpandedChange = { uiState.songInfoExpanded = it },
+                        onRatingSheetSongChange = { uiState.ratingSheetSong = it },
+                        onAiSheetSongChange = { uiState.aiSheetSong = it },
+                        onTagEditorSongChange = { uiState.tagEditorSong = it },
+                        onTagEditorKindChange = { uiState.tagEditorKind = it },
+                        onLyricMatchSongChange = { uiState.lyricMatchSong = it },
+                        onOpenEqualizer = onNavigateToEqualizer,
+                        onRequestDeleteSong = ::requestDeleteSong,
+                        onNavigateToAlbum = onNavigateToAlbum,
+                        onNavigateToArtist = onNavigateToArtist,
+                        openLyricSharePicker = ::openLyricSharePicker,
+                        navigateToArtistOrChoose = ::navigateToArtistOrChoose,
+                        onShowLyrics = onShowLyrics,
+                        onSwipePrevious = { playerViewModel.skipToPreviousTrack() },
+                        drawBackground = immersiveAlbumCover,
+                        modifier = pageModifier
+                    )
+                },
+                lyricsPage = { onDismissLyrics, enableSwipeDismiss, backEnabled, pageModifier ->
+                    LyricsPageContent(
+                        song = song,
+                        embeddedCover = embeddedCover,
+                        paletteBitmap = paletteBitmap,
+                        songAnnotation = displayAnnotation,
+                        lyrics = lyrics,
+                        lyricsLoading = lyricsLoading,
+                        currentLyricIndex = currentLyricIndex,
+                        currentPosition = currentPosition,
+                        showLyricTranslation = showLyricTranslation,
+                        showLyricPronunciation = showLyricPronunciation,
+                        lyricPageKeepScreenOn = lyricPageKeepScreenOn,
+                        lyricFormatAvailability = lyricFormatAvailability,
+                        preferTtmlLyrics = preferTtmlLyrics,
+                        lyricSourceMode = lyricSourceMode,
+                        lyricParserEngine = lyricParserEngine,
+                        lyricLayoutProfile = lyricLayoutProfile,
+                        lyricFontFamily = lyricFontFamily,
+                        effectiveLyricFontPath = effectiveLyricFontPath,
+                        lyricFontWeight = lyricFontWeight,
+                        lyricFontScale = lyricFontScale,
+                        lyricSecondaryFontScale = lyricSecondaryFontScale,
+                        lyricPrimaryTextSizeSp = lyricPrimaryTextSizeSp,
+                        lyricSecondaryTextSizeSp = lyricSecondaryTextSizeSp,
+                        lyricPerspectiveEffect = lyricPerspectiveEffect,
+                        lyricPerspectiveYAngle = lyricPerspectiveYAngle,
+                        lyricTextAlign = playerLyricTextAlign,
+                        lyricPalette = lyricPalette,
+                        isPlaying = isPlaying,
+                        playerBackgroundEnabled = playerBackgroundEnabled,
+                        playerBackgroundUri = playerBackgroundUri,
+                        playerBackgroundOpacity = playerBackgroundOpacity,
+                        playerBackgroundDim = playerBackgroundDim,
+                        beautifulLyricsBackground = beautifulLyricsBackground,
+                        isCurrentSongFavorite = isCurrentSongFavorite,
+                        audioSessionId = audioSessionId,
+                        effectiveAudioVisualizerEnabled = effectiveAudioVisualizerEnabled,
+                        audioVisualizerOpacity = audioVisualizerOpacity,
+                        playerViewModel = playerViewModel,
+                        settingsManager = settingsManager,
+                        scope = scope,
+                        openLyricSharePicker = ::openLyricSharePicker,
+                        navigateToArtistOrChoose = ::navigateToArtistOrChoose,
+                        onDismissLyrics = onDismissLyrics,
+                        enableSwipeDismiss = enableSwipeDismiss,
+                        backEnabled = backEnabled,
+                        immersiveAlbumCover = immersiveAlbumCover,
+                        drawBackground = immersiveAlbumCover,
+                        modifier = pageModifier
+                    )
+                },
+                detailPage = { pageModifier ->
+                    DetailPageContent(
+                        context = context,
+                        song = song,
+                        embeddedCover = embeddedCover,
+                        paletteBitmap = paletteBitmap,
+                        tagInfo = tagInfo,
+                        neteaseInfo = neteaseInfo,
+                        lyricPalette = lyricPalette,
+                        currentPosition = currentPosition,
+                        isPlaying = isPlaying,
+                        beautifulLyricsBackground = beautifulLyricsBackground,
+                        playerBackgroundUri = playerBackgroundUri,
+                        playerBackgroundOpacity = playerBackgroundOpacity,
+                        playerBackgroundDim = playerBackgroundDim,
+                        immersiveAlbumCover = immersiveAlbumCover,
+                        playerBackgroundEnabled = playerBackgroundEnabled,
+                        onNavigateToAlbum = onNavigateToAlbum,
+                        onNavigateToArtist = onNavigateToArtist,
+                        onNavigateToMetadataCategory = onNavigateToMetadataCategory,
+                        openNetease = ::openNetease,
+                        drawBackground = immersiveAlbumCover,
+                        modifier = pageModifier
+                    )
+                },
+                modifier = Modifier.fillMaxSize()
+            )
+
+            PlayerLandscapeOverlayHost(
+                context = context,
+                expanded = landscapeState.expanded,
+                coverMode = landscapeState.coverMode,
+                dynamicCoverEnabled = dynamicCoverEnabled,
+                dynamicCoverCustomFolders = dynamicCoverCustomFolders,
+                song = song,
+                embeddedCover = embeddedCover,
+                paletteBitmap = paletteBitmap,
+                annotation = displayAnnotation,
+                dynamicCoverFailedPath = uiState.dynamicCoverFailedPath,
+                isPlaying = isPlaying,
+                currentPosition = currentPosition,
+                duration = duration,
+                shuffleEnabled = shuffleEnabled,
+                repeatMode = repeatMode,
+                audioInfo = audioInfo,
+                palette = if (landscapeState.coverMode) palette else lyricPalette,
+                lyrics = lyrics,
+                lyricsLoading = lyricsLoading,
+                currentLyricIndex = currentLyricIndex,
+                showTranslation = showLyricTranslation,
+                showPronunciation = showLyricPronunciation,
+                fontFamily = lyricFontFamily,
+                fontPath = effectiveLyricFontPath,
+                fontWeight = lyricFontWeight,
+                fontScale = lyricFontScale,
+                secondaryFontScale = lyricSecondaryFontScale,
+                primaryTextSizeSp = lyricPrimaryTextSizeSp,
+                secondaryTextSizeSp = lyricSecondaryTextSizeSp,
+                lyricTextAlign = playerLyricTextAlign,
+                lyricPerspectiveEffect = lyricPerspectiveEffect,
+                lyricPerspectiveYAngle = lyricPerspectiveYAngle,
+                showTotalDuration = playerShowTotalDuration,
+                queueExpanded = uiState.queueExpanded,
+                playlist = playlist,
+                audioSessionId = audioSessionId,
+                visualizerEnabled = effectiveAudioVisualizerEnabled,
+                visualizerOpacity = audioVisualizerOpacity,
+                // Landscape player always allows swiping covers to switch songs,
+                // regardless of the "swipe cover to switch song" setting (which only
+                // applies to the portrait player cover page).
+                coverSwipeEnabled = true,
+                beautifulLyricsBackground = beautifulLyricsBackground,
+                flowEffectMode = SettingsManager.PLAYER_FLOW_EFFECT_DARK,
+                isFavorite = isCurrentSongFavorite,
+                onDynamicCoverFailed = { uiState.dynamicCoverFailedPath = it },
+                onToggleFavorite = { playerViewModel.toggleCurrentSongFavorite() },
+                onToggleQueue = { uiState.queueExpanded = !uiState.queueExpanded },
+                onDismissQueue = { uiState.queueExpanded = false },
+                onShowLyrics = { landscapeState.coverMode = false },
+                onShowCoverPlayer = { landscapeState.coverMode = true },
+                onLyricLineClick = { line -> playerViewModel.seekTo(line.timeMs) },
+                onLyricLineLongClick = ::openLyricSharePicker,
+                onSeekProgress = { progress ->
+                    if (duration > 0L) playerViewModel.seekTo((duration * progress).toLong())
+                },
+                onCyclePlaybackMode = { playerViewModel.cyclePlaybackMode() },
+                onPrevious = { playerViewModel.skipToPrevious() },
+                onSwipePrevious = { playerViewModel.skipToPreviousTrack() },
+                onPlayPause = { playerViewModel.togglePlayPause() },
+                onNext = { playerViewModel.skipToNext() },
+                onQueueSongClick = { index ->
+                    uiState.queueExpanded = false
+                    playerViewModel.playQueueIndex(index)
+                },
+                onRemoveQueueSong = { index -> playerViewModel.removeFromPlaylist(index) },
+                onMoveQueueSong = { fromIndex, toIndex ->
+                    playerViewModel.movePlaylistItem(fromIndex, toIndex)
+                },
+                onAddQueueToPlaylist = {
+                    uiState.queueExpanded = false
+                    uiState.playlistPickerSongs = playlist
+                },
+                onClearQueue = {
+                    uiState.queueExpanded = false
+                    playerViewModel.clearPlaylist()
+                },
+                onArtist = {
+                    navigateToArtistOrChoose(song?.artist.orEmpty())
+                },
+                onDismiss = {
+                    landscapeState.expanded = false
+                    landscapeState.coverMode = false
+                }
+            )
+          }
+
+            PlayerScreenSheetHost(
+                context = context,
+                scope = scope,
+                mainViewModel = mainViewModel,
+                playerViewModel = playerViewModel,
+                song = song,
+                playlists = playlists,
+                artistChoices = uiState.artistChoices,
+                onArtistChoicesChange = { uiState.artistChoices = it },
+                onNavigateToArtist = onNavigateToArtist,
+                songInfoExpanded = uiState.songInfoExpanded,
+                onSongInfoExpandedChange = { uiState.songInfoExpanded = it },
+                dynamicCoverSheetSong = uiState.dynamicCoverSheetSong,
+                onDynamicCoverSheetSongChange = { uiState.dynamicCoverSheetSong = it },
+                ratingSheetSong = uiState.ratingSheetSong,
+                onRatingSheetSongChange = { uiState.ratingSheetSong = it },
+                aiSheetSong = uiState.aiSheetSong,
+                onAiSheetSongChange = { uiState.aiSheetSong = it },
+                deleteConfirmSong = uiState.deleteConfirmSong,
+                onDeleteConfirmSongChange = { uiState.deleteConfirmSong = it },
+                lyricMatchSong = uiState.lyricMatchSong,
+                onLyricMatchSongChange = { uiState.lyricMatchSong = it },
+                tagEditorSong = uiState.tagEditorSong,
+                onTagEditorSongChange = { uiState.tagEditorSong = it },
+                tagEditorKind = uiState.tagEditorKind,
+                onTagEditorKindChange = { uiState.tagEditorKind = it },
+                metadataEditorId = metadataEditorId,
+                lyricTimingEditorId = lyricTimingEditorId,
+                metadataEditorSong = uiState.metadataEditorSong,
+                onMetadataEditorSongChange = { uiState.metadataEditorSong = it },
+                onWritePermissionRequired = { error, retry ->
+                    uiState.pendingWriteRetry = retry
+                    deletePermissionLauncher.launch(
+                        IntentSenderRequest.Builder(error.intentSender).build()
+                    )
+                },
+                playlistPickerSong = uiState.playlistPickerSong,
+                onPlaylistPickerSongChange = { uiState.playlistPickerSong = it },
+                playlistPickerSongs = uiState.playlistPickerSongs,
+                onPlaylistPickerSongsChange = { uiState.playlistPickerSongs = it },
+                createPlaylistSong = uiState.createPlaylistSong,
+                onCreatePlaylistSongChange = { uiState.createPlaylistSong = it },
+                createPlaylistSongs = uiState.createPlaylistSongs,
+                onCreatePlaylistSongsChange = { uiState.createPlaylistSongs = it }
+            )
+        }
+    }
+}
+
+private fun isLyricVideoShareUnsupported(
+    song: Song?,
+    audioInfo: AudioInfo?
+): Boolean {
+    // Apple Lossless (ALAC) — container/format not supported by the muxer pipeline
+    if (normalizedAudioFormat(audioInfo?.format.orEmpty()) == "ALAC") return true
+
+    val mimeType = song?.mimeType.orEmpty().lowercase()
+    if ("alac" in mimeType) return true
+
+    val path = song?.path.orEmpty().lowercase()
+    if (path.endsWith(".alac")) return true
+
+    // Master / Hi-Res 24-bit 192kHz+ audio — transcode pipeline produces pitch-shifted output
+    // due to PCM buffer size miscalculation at very high sample rates.
+    // Disable video sharing for these until the encoder is fixed.
+    val sampleRate = audioInfo?.sampleRate ?: 0
+    val bitDepth = audioInfo?.bitDepth ?: 0
+    if (sampleRate >= 192_000 && bitDepth >= 24) return true
+
+    return false
+}
