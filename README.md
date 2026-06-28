@@ -13,6 +13,7 @@
 
 **Halcyon** 是一款基于 **Jetpack Compose、Miuix 和 AndroidX Media3** 构建的 Android 本地音乐播放器。功能不再赘述。
 本项目主要基于AI vibe coding进行开发，使用Halcyon作为基础，把其中的音乐可视化效果用sonic topography替换。但是效果还不是太完美，脉冲和脉冲带来的涟漪效果不能根据每一次Beat来进行显示。因此开源到Github希望有人能解决。项目中也添加了可视化效果日志的读取功能，在APP的设置里的可视化效果日志，并且日志也同时保存在了data/data/com.ella.music/files/debug_logs/visualizer_debug.log目录。
+编译好的APK在Release中
 
 ---
 
